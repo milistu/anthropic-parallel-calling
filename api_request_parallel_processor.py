@@ -272,6 +272,8 @@ async def process_api_requests_from_file(
         logging.info(
             f"""Parallel processing complete. Results saved to {save_filepath}"""
         )
+        logging.info(f"""Total input tokens {status_tracker.total_tokens_used}""")
+
         if status_tracker.num_tasks_failed > 0:
             logging.warning(
                 f"{status_tracker.num_tasks_failed} / {status_tracker.num_tasks_started} requests failed. Errors logged to {save_filepath}."
