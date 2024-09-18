@@ -130,7 +130,7 @@ async def process_api_requests_from_file(
     logging.debug(f"Logging initialized at level {logging_level}")
 
     # infer API endpoint and construct request header
-    api_endpoint = api_endpoint_from_url(request_url)
+    # api_endpoint = api_endpoint_from_url(request_url) # ❌
     request_header = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
@@ -157,13 +157,13 @@ async def process_api_requests_from_file(
 
     # initialize flags
     file_not_finished = True  # after file is empty, we'll skip reading it
-    logging.debug(f"Initialization complete.")
+    logging.debug("Initialization complete.")
 
     # initialize file reading
     with open(requests_filepath) as file:
         # `requests` will provide requests one at a time
         requests = file.__iter__()
-        logging.debug(f"File opened. Entering main loop")
+        logging.debug("File opened. Entering main loop")
         async with aiohttp.ClientSession() as session:  # Initialize ClientSession here
             while True:
                 # get next request (if one is not already waiting for capacity)
@@ -204,8 +204,8 @@ async def process_api_requests_from_file(
                     + max_requests_per_minute * seconds_since_update / 60.0,
                     max_requests_per_minute,
                 )
-                available_token_capacity = min(
-                    available_token_capacity
+                status_tracker.available_token_capacity = min(
+                    status_tracker.available_token_capacity
                     + max_tokens_per_minute * seconds_since_update / 60.0,
                     max_tokens_per_minute,
                 )
@@ -213,18 +213,19 @@ async def process_api_requests_from_file(
 
                 # if enough capacity available, call API
                 if next_request:
-                    # next_request_tokens = next_request.token_consumption # ❌
+                    next_request_tokens = next_request.estimate_token_consumption
                     if (
                         available_request_capacity >= 1
-                        and available_token_capacity >= next_request_tokens
+                        and status_tracker.available_token_capacity
+                        >= next_request_tokens
                     ):
                         # update counters
                         available_request_capacity -= 1
-                        available_token_capacity -= next_request_tokens
+                        status_tracker.available_token_capacity -= next_request_tokens
                         next_request.attempts_left -= 1
 
                         # call API
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             next_request.call_api(
                                 session=session,
                                 request_url=request_url,
@@ -234,6 +235,12 @@ async def process_api_requests_from_file(
                                 status_tracker=status_tracker,
                             )
                         )
+                        task.add_done_callback(
+                            lambda _: asyncio.create_task(
+                                update_token_usage(next_request, status_tracker)
+                            )
+                        )
+
                         next_request = None  # reset next_request to empty
 
                 # if all tasks are finished, break
@@ -379,6 +386,7 @@ class APIRequest:
 # functions
 
 
+# Not used ❌
 def api_endpoint_from_url(request_url):
     """Extract the API endpoint from the request URL."""
     match = re.search("^https://[^/]+/v\\d+/(.+)$", request_url)
@@ -538,3 +546,4 @@ As with all jsonl files, take care that newlines in the content are properly esc
 """
 
 ## Set default values for Tier 1
+## TODO: MAybe add all tiers
