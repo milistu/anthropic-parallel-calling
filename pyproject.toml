@@ -9,7 +9,10 @@ readme = "README.md"
 python = "^3.10"
 anthropic = "^0.34.2"
 aiohttp = "^3.10.5"
+python-dotenv = "^1.0.1"
 
+[tool.poetry.dev-dependencies]
+jupyter = "^1.1.1"
 
 [build-system]
 requires = ["poetry-core"]
