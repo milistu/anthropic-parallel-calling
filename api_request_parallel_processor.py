@@ -20,9 +20,9 @@ Example command to call script: 📌
 python examples/api_request_parallel_processor.py \
   --requests_filepath examples/data/example_requests_to_parallel_process.jsonl \
   --save_filepath examples/data/example_requests_to_parallel_process_results.jsonl \
-  --request_url https://api.anthropic.com/v1/complete \
-  --max_requests_per_minute 1500 \
-  --max_tokens_per_minute 6250000 \
+  --request_url https://api.anthropic.com/v1/messages \
+  --max_requests_per_minute 40 \
+  --max_tokens_per_minute 16000 \
   --max_attempts 5 \
   --logging_level 20
 ```
@@ -93,7 +93,6 @@ import asyncio  # for running API calls concurrently
 import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
 import os  # for reading API key
-import re  # for matching endpoint from request URL
 import time  # for sleeping after rate limit is hit
 from dataclasses import (
     dataclass,
@@ -102,6 +101,7 @@ from dataclasses import (
 
 import aiohttp  # for making API calls concurrently
 from anthropic import Anthropic
+from dotenv import find_dotenv, load_dotenv
 
 
 async def process_api_requests_from_file(
@@ -111,7 +111,6 @@ async def process_api_requests_from_file(
     api_key: str,
     max_requests_per_minute: float,
     max_tokens_per_minute: float,
-    token_encoding_name: str,
     max_attempts: int,
     logging_level: int,
 ):
@@ -130,15 +129,11 @@ async def process_api_requests_from_file(
     logging.debug(f"Logging initialized at level {logging_level}")
 
     # infer API endpoint and construct request header
-    # api_endpoint = api_endpoint_from_url(request_url) # ❌
     request_header = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
-    # # use api-key header for Azure deployments ❌
-    # if "/deployments" in request_url:
-    #     request_header = {"api-key": f"{api_key}"}
 
     # initialize trackers
     queue_of_requests_to_retry = asyncio.Queue()
@@ -225,7 +220,7 @@ async def process_api_requests_from_file(
                         next_request.attempts_left -= 1
 
                         # call API
-                        task = asyncio.create_task(
+                        asyncio.create_task(
                             next_request.call_api(
                                 session=session,
                                 request_url=request_url,
@@ -233,11 +228,6 @@ async def process_api_requests_from_file(
                                 retry_queue=queue_of_requests_to_retry,
                                 save_filepath=save_filepath,
                                 status_tracker=status_tracker,
-                            )
-                        )
-                        task.add_done_callback(
-                            lambda _: asyncio.create_task(
-                                update_token_usage(next_request, status_tracker)
                             )
                         )
 
@@ -337,6 +327,10 @@ class APIRequest:
                 self.actual_tokens = response_json.get("usage", {}).get(
                     "input_tokens", 0
                 )
+
+                # Update token usage
+                token_difference = self.actual_tokens - self.estimate_token_consumption
+                status_tracker.available_token_capacity -= token_difference
                 status_tracker.total_tokens_used += self.actual_tokens
 
                 data = (
@@ -388,17 +382,6 @@ class APIRequest:
 # functions
 
 
-# Not used ❌
-def api_endpoint_from_url(request_url):
-    """Extract the API endpoint from the request URL."""
-    match = re.search("^https://[^/]+/v\\d+/(.+)$", request_url)
-    if not match:
-        raise ValueError(
-            f"Could not extract API endpoint from request URL: {request_url}"
-        )
-    return match[1]
-
-
 def append_to_jsonl(data, filename: str) -> None:
     """Append a json payload to the end of a jsonl file."""
     json_string = json.dumps(data)
@@ -408,75 +391,13 @@ def append_to_jsonl(data, filename: str) -> None:
 
 def estimate_num_tokens_from_request(client: Anthropic, request_json: dict) -> int:
     """Estimate the number of tokens consumed by a request."""
-    return client.count_tokens(request_json.get("prompt", ""))
+    return client.count_tokens(request_json.get("messages", "")[0].get("content", ""))
 
 
-async def update_token_usage(
-    request: APIRequest, status_tracker: StatusTracker
-) -> None:
+def update_token_usage(request: APIRequest, status_tracker: StatusTracker) -> None:
     """Update the token usage based on the actual tokens consumed by the request."""
     token_difference = request.actual_tokens - request.estimate_token_consumption
     status_tracker.available_token_capacity -= token_difference
-
-
-# ❌
-# def num_tokens_consumed_from_request(
-#     request_json: dict,
-#     api_endpoint: str,
-#     token_encoding_name: str,
-# ):
-#     """Count the number of tokens in the request. Only supports completion and embedding requests."""
-#     encoding = tiktoken.get_encoding(token_encoding_name)
-#     # if completions request, tokens = prompt + n * max_tokens
-#     if api_endpoint.endswith("completions"):
-#         max_tokens = request_json.get("max_tokens", 15)
-#         n = request_json.get("n", 1)
-#         completion_tokens = n * max_tokens
-
-#         # chat completions
-#         if api_endpoint.startswith("chat/"):
-#             num_tokens = 0
-#             for message in request_json["messages"]:
-#                 num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
-#                 for key, value in message.items():
-#                     num_tokens += len(encoding.encode(value))
-#                     if key == "name":  # if there's a name, the role is omitted
-#                         num_tokens -= 1  # role is always required and always 1 token
-#             num_tokens += 2  # every reply is primed with <im_start>assistant
-#             return num_tokens + completion_tokens
-#         # normal completions
-#         else:
-#             prompt = request_json["prompt"]
-#             if isinstance(prompt, str):  # single prompt
-#                 prompt_tokens = len(encoding.encode(prompt))
-#                 num_tokens = prompt_tokens + completion_tokens
-#                 return num_tokens
-#             elif isinstance(prompt, list):  # multiple prompts
-#                 prompt_tokens = sum([len(encoding.encode(p)) for p in prompt])
-#                 num_tokens = prompt_tokens + completion_tokens * len(prompt)
-#                 return num_tokens
-#             else:
-#                 raise TypeError(
-#                     'Expecting either string or list of strings for "prompt" field in completion request'
-#                 )
-#     # if embeddings request, tokens = input tokens
-#     elif api_endpoint == "embeddings":
-#         input = request_json["input"]
-#         if isinstance(input, str):  # single input
-#             num_tokens = len(encoding.encode(input))
-#             return num_tokens
-#         elif isinstance(input, list):  # multiple inputs
-#             num_tokens = sum([len(encoding.encode(i)) for i in input])
-#             return num_tokens
-#         else:
-#             raise TypeError(
-#                 'Expecting either string or list of strings for "inputs" field in embedding request'
-#             )
-#     # more logic needed to support other API calls (e.g., edits, inserts, DALL-E)
-#     else:
-#         raise NotImplementedError(
-#             f'API endpoint "{api_endpoint}" not implemented in this script'
-#         )
 
 
 def task_id_generator_function():
@@ -491,17 +412,22 @@ def task_id_generator_function():
 
 
 if __name__ == "__main__":
+    status = load_dotenv(find_dotenv())
+    if status:
+        print("Successfully loaded .env file")
+    else:
+        print("No .env file found")
+
     # parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--requests_filepath")
     parser.add_argument("--save_filepath", default=None)
     parser.add_argument(
-        "--request_url", default="https://api.anthropic.com/v1/complete"
+        "--request_url", default="https://api.anthropic.com/v1/messages"
     )
     parser.add_argument("--api_key", default=os.getenv("ANTHROPIC_API_KEY"))
     parser.add_argument("--max_requests_per_minute", type=int, default=50 * 0.8)
     parser.add_argument("--max_tokens_per_minute", type=int, default=20_000 * 0.8)
-    parser.add_argument("--token_encoding_name", default="cl100k_base")
     parser.add_argument("--max_attempts", type=int, default=5)
     parser.add_argument("--logging_level", default=logging.INFO)
     args = parser.parse_args()
@@ -518,7 +444,6 @@ if __name__ == "__main__":
             api_key=args.api_key,
             max_requests_per_minute=float(args.max_requests_per_minute),
             max_tokens_per_minute=float(args.max_tokens_per_minute),
-            token_encoding_name=args.token_encoding_name,
             max_attempts=int(args.max_attempts),
             logging_level=int(args.logging_level),
         )
@@ -549,3 +474,4 @@ As with all jsonl files, take care that newlines in the content are properly esc
 
 ## Set default values for Tier 1
 ## TODO: MAybe add all tiers
+## Change logging to loguru
