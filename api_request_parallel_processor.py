@@ -15,11 +15,11 @@ Features:
 - Retries failed requests up to {max_attempts} times, to avoid missing data
 - Logs errors, to diagnose problems with requests
 
-Example command to call script: 📌
+Example command to call script:
 ```
 python examples/api_request_parallel_processor.py \
-  --requests_filepath examples/data/example_requests_to_parallel_process.jsonl \
-  --save_filepath examples/data/example_requests_to_parallel_process_results.jsonl \
+  --requests_filepath examples/test_requests_to_parallel_process.jsonl \
+  --save_filepath examples/data/test_requests_to_parallel_process_results.jsonl \
   --request_url https://api.anthropic.com/v1/messages \
   --max_requests_per_minute 40 \
   --max_tokens_per_minute 16000 \
@@ -31,18 +31,18 @@ Inputs:
 - requests_filepath : str
     - path to the file containing the requests to be processed
     - file should be a jsonl file, where each line is a json object with API parameters and an optional metadata field
-    - e.g., {"model": "text-embedding-3-small", "input": "embed me", "metadata": {"row_id": 1}}
+    - e.g., {"model": "claude-3-5-sonnet-20240620", "max_tokens": 1024, "messages": [{"role": "user", "content": f"Tell me a joke"}], "metadata": {"row_id": 1}}
     - as with all jsonl files, take care that newlines in the content are properly escaped (json.dumps does this automatically)
-    - an example file is provided at examples/data/example_requests_to_parallel_process.jsonl 📌
-    - the code to generate the example file is appended to the bottom of this script 📌
+    - an example file is provided at examples/test_requests_to_parallel_process.jsonl
+    - the code to generate the example file is appended to the bottom of this script
 - save_filepath : str, optional
     - path to the file where the results will be saved
     - file will be a jsonl file, where each line is an array with the original request plus the API response
-    - e.g., [{"model": "text-embedding-3-small", "input": "embed me"}, {...}] 📌
+    - e.g., [{"model": "claude-3-5-sonnet-20240620", "max_tokens": 1024, "messages": [{"role": "user", "content": f"Tell me a joke"}]}, {...}]
     - if omitted, results will be saved to {requests_filename}_results.jsonl
 - request_url : str, optional
     - URL of the API endpoint to call
-    - if omitted, will default to "https://api.anthropic.com/v1/complete"
+    - if omitted, will default to "https://api.anthropic.com/v1/messages"
 - api_key : str, optional
     - API key to use
     - if omitted, the script will attempt to read it from an environment variable {os.getenv("ANTHROPIC_API_KEY")}
@@ -58,7 +58,7 @@ Inputs:
 - max_attempts : int, optional
     - number of times to retry a failed request before giving up
     - if omitted, will default to 5
-- logging_level : int, optional 📌
+- logging_level : int, optional 
     - level of logging to use; higher numbers will log fewer messages
     - 40 = ERROR; will log only when requests fail after all retries
     - 30 = WARNING; will log when requests his rate limits or other errors
@@ -80,9 +80,8 @@ The script is structured as follows:
         - StatusTracker (stores script metadata counters; only one instance is created)
         - APIRequest (stores API inputs, outputs, metadata; one method to call API)
     - Define functions
-        - api_endpoint_from_url (extracts API endpoint from request URL)
         - append_to_jsonl (writes to results file)
-        - num_tokens_consumed_from_request (bigger function to infer token usage from request)
+        - estimate_num_tokens_from_request (smaller function to roughly estimate token usage from request)
         - task_id_generator_function (yields 0, 1, 2, ...)
     - Run main()
 """
@@ -108,6 +107,7 @@ async def process_api_requests_from_file(
     requests_filepath: str,
     save_filepath: str,
     request_url: str,
+    use_caching: bool,
     api_key: str,
     max_requests_per_minute: float,
     max_tokens_per_minute: float,
@@ -134,6 +134,8 @@ async def process_api_requests_from_file(
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
+    if use_caching:
+        request_header["anthropic-beta"] = "prompt-caching-2024-07-31"
 
     # initialize trackers
     queue_of_requests_to_retry = asyncio.Queue()
@@ -176,7 +178,10 @@ async def process_api_requests_from_file(
                                 task_id=next(task_id_generator),
                                 request_json=request_json,
                                 estimate_token_consumption=estimate_num_tokens_from_request(
-                                    client, request_json
+                                    client,
+                                    request_json,
+                                    use_caching,
+                                    status_tracker.caching_status,
                                 ),
                                 attempts_left=max_attempts,
                                 metadata=request_json.pop("metadata", None),
@@ -291,6 +296,7 @@ class StatusTracker:
     time_of_last_rate_limit_error: int = 0  # used to cool off after hitting rate limits
     total_tokens_used: int = 0
     available_token_capacity: int = 0
+    caching_status: bool = False
 
 
 @dataclass
@@ -389,9 +395,39 @@ def append_to_jsonl(data, filename: str) -> None:
         f.write(json_string + "\n")
 
 
-def estimate_num_tokens_from_request(client: Anthropic, request_json: dict) -> int:
-    """Estimate the number of tokens consumed by a request."""
-    return client.count_tokens(request_json.get("messages", "")[0].get("content", ""))
+def estimate_num_tokens_from_request(
+    client: Anthropic, request_json: dict, use_caching: bool, caching_status: bool
+) -> int:
+    """
+    Estimate the number of tokens consumed by a request.
+    Returns an estimation of total tokens number.
+    """
+    # Count tokens in messages
+    message_tokens = sum(
+        client.count_tokens(message.get("content", ""))
+        for message in request_json.get("messages", [])
+    )
+
+    # Count tokens in system messages
+    system_tokens = 0
+    cached_system_tokens = 0
+
+    for element in request_json.get("system", []):
+        text = element.get("text", "")
+        token_count = client.count_tokens(text)
+
+        if element.get("cache_control", {}).get("type") == "ephemeral":
+            cached_system_tokens += token_count
+        else:
+            system_tokens += token_count
+
+    # Determine total tokens based on caching settings
+    if use_caching and caching_status:
+        total_tokens = message_tokens + system_tokens
+    else:
+        total_tokens = message_tokens + system_tokens + cached_system_tokens
+
+    return total_tokens
 
 
 def update_token_usage(request: APIRequest, status_tracker: StatusTracker) -> None:
@@ -425,6 +461,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--request_url", default="https://api.anthropic.com/v1/messages"
     )
+    parser.add_argument("--use_caching", default=False)
     parser.add_argument("--api_key", default=os.getenv("ANTHROPIC_API_KEY"))
     parser.add_argument("--max_requests_per_minute", type=int, default=50 * 0.8)
     parser.add_argument("--max_tokens_per_minute", type=int, default=20_000 * 0.8)
@@ -441,6 +478,7 @@ if __name__ == "__main__":
             requests_filepath=args.requests_filepath,
             save_filepath=args.save_filepath,
             request_url=args.request_url,
+            use_caching=args.use_caching,
             api_key=args.api_key,
             max_requests_per_minute=float(args.max_requests_per_minute),
             max_tokens_per_minute=float(args.max_tokens_per_minute),
@@ -453,16 +491,29 @@ if __name__ == "__main__":
 """
 APPENDIX
 
-The example requests file at openai-cookbook/examples/data/example_requests_to_parallel_process.jsonl contains 10,000 requests to text-embedding-3-small.
+The example requests file at Anthropic-Parallelism/examples/test_requests_to_parallel_process contains 10 requests to `claude-3-5-sonnet-20240620`.
 
 It was generated with the following code:
 
 ```python
 import json
 
-filename = "data/example_requests_to_parallel_process.jsonl"
-n_requests = 10_000
-jobs = [{"model": "text-embedding-3-small", "input": str(x) + "\n"} for x in range(n_requests)]
+filename = "examples/test_requests_to_parallel_process.jsonl"
+n_requests = 10
+jobs = [
+    {
+        "model": "claude-3-5-sonnet-20240620",
+        "max_tokens": 1024,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "user",
+                "content": f"How much is 8 * {x}?",
+            }
+        ],
+    }
+    for x in range(n_requests)
+]
 with open(filename, "w") as f:
     for job in jobs:
         json_string = json.dumps(job)
