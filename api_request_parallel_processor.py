@@ -143,7 +143,7 @@ async def process_api_requests_from_file(
         task_id_generator_function()
     )  # generates integer IDs of 0, 1, 2, ...
     status_tracker = StatusTracker(
-        available_token_capacity=max_tokens_per_minute
+        available_token_capacity=max_tokens_per_minute, use_caching=use_caching
     )  # single instance to track a collection of variables
     next_request = None  # variable to hold the next request to call
 
@@ -296,6 +296,7 @@ class StatusTracker:
     time_of_last_rate_limit_error: int = 0  # used to cool off after hitting rate limits
     total_tokens_used: int = 0
     available_token_capacity: int = 0
+    use_caching: bool = False
     caching_status: bool = False
 
 
@@ -333,6 +334,14 @@ class APIRequest:
                 self.actual_tokens = response_json.get("usage", {}).get(
                     "input_tokens", 0
                 )
+                if status_tracker.use_caching:
+                    num_cache_tokens_used = response_json.get("usage", {}).get(
+                        "cache_read_input_tokens", 0
+                    )
+                    if num_cache_tokens_used > 0:
+                        status_tracker.caching_status = True
+                    else:
+                        status_tracker.caching_status = False
 
                 # Update token usage
                 token_difference = self.actual_tokens - self.estimate_token_consumption
@@ -491,6 +500,7 @@ if __name__ == "__main__":
 """
 APPENDIX
 
+## Calling Claude withouth Caching
 The example requests file at Anthropic-Parallelism/examples/test_requests_to_parallel_process contains 10 requests to `claude-3-5-sonnet-20240620`.
 
 It was generated with the following code:
@@ -521,6 +531,9 @@ with open(filename, "w") as f:
 ```
 
 As with all jsonl files, take care that newlines in the content are properly escaped (json.dumps does this automatically).
+
+## Calling Claude with Caching
+
 """
 
 ## Set default values for Tier 1
