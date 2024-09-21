@@ -33,6 +33,7 @@ python api_request_parallel_processor.py \
   --requests_filepath examples/test_caching_requests_to_parallel_process.jsonl \
   --save_filepath examples/data/test_caching_requests_to_parallel_process_results.jsonl \
   --request_url https://api.anthropic.com/v1/messages \
+  --use_caching True \
   --max_requests_per_minute 40 \
   --max_tokens_per_minute 16000 \
   --max_attempts 5 \
