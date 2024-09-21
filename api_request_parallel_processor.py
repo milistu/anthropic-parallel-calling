@@ -16,10 +16,22 @@ Features:
 - Logs errors, to diagnose problems with requests
 
 Example command to call script:
+- Without Caching:
 ```
-python examples/api_request_parallel_processor.py \
+python api_request_parallel_processor.py \
   --requests_filepath examples/test_requests_to_parallel_process.jsonl \
   --save_filepath examples/data/test_requests_to_parallel_process_results.jsonl \
+  --request_url https://api.anthropic.com/v1/messages \
+  --max_requests_per_minute 40 \
+  --max_tokens_per_minute 16000 \
+  --max_attempts 5 \
+  --logging_level 20
+```
+- With Caching:
+```
+python api_request_parallel_processor.py \
+  --requests_filepath examples/test_caching_requests_to_parallel_process.jsonl \
+  --save_filepath examples/data/test_caching_requests_to_parallel_process_results.jsonl \
   --request_url https://api.anthropic.com/v1/messages \
   --max_requests_per_minute 40 \
   --max_tokens_per_minute 16000 \
@@ -540,6 +552,37 @@ with open(filename, "w") as f:
 As with all jsonl files, take care that newlines in the content are properly escaped (json.dumps does this automatically).
 
 ## Calling Claude with Caching
+
+filename = "examples/test_caching_requests_to_parallel_process.jsonl"
+jobs = [
+    {
+        "model": "claude-3-5-sonnet-20240620",
+        "max_tokens": 1024,
+        "temperature": 0,
+        "system": [
+            {
+                "type": "text",
+                "text": "You are an AI assistant tasked with analyzing blogs. Your goal is to provide insightful information and kowledge.\n",
+            },
+            {
+                "type": "text",
+                "text": "<some very long blog.>",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": query,
+            }
+        ],
+    }
+    for query in queries
+]
+with open(filename, "w") as f:
+    for job in jobs:
+        json_string = json.dumps(job)
+        f.write(json_string + "\n")
 
 """
 
