@@ -344,8 +344,7 @@ class APIRequest:
                         status_tracker.caching_status = False
 
                 # Update token usage
-                token_difference = self.actual_tokens - self.estimate_token_consumption
-                status_tracker.available_token_capacity -= token_difference
+                update_token_usage(self, status_tracker)
                 status_tracker.total_tokens_used += self.actual_tokens
 
                 data = (
@@ -442,7 +441,15 @@ def estimate_num_tokens_from_request(
 def update_token_usage(request: APIRequest, status_tracker: StatusTracker) -> None:
     """Update the token usage based on the actual tokens consumed by the request."""
     token_difference = request.actual_tokens - request.estimate_token_consumption
-    status_tracker.available_token_capacity -= token_difference
+    new_capacity = status_tracker.available_token_capacity - token_difference
+
+    if new_capacity < 0:
+        logging.debug(
+            f"Token capacity would have gone negative by {abs(new_capacity)} tokens. Resetting to 0."
+        )
+        status_tracker.available_token_capacity = 0
+    else:
+        status_tracker.available_token_capacity = new_capacity
 
 
 def task_id_generator_function():
