@@ -1,0 +1,4 @@
+aiohttp==3.10.5
+anthropic==0.34.2
+loguru==0.7.2
+python-dotenv==1.0.1
