@@ -1,5 +1,5 @@
 # Anthropic Parallel API Processor
-
+![Anthropic Logo](https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Anthropic_logo.svg/2560px-Anthropic_logo.svg.png)
 ## Overview
 
 This tool is designed to generate datasets faster and more cost-effectively by parallel calling the Anthropic API with optional caching for Claude. It's perfect for processing large volumes of requests while respecting rate limits.
