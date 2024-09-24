@@ -71,13 +71,17 @@ Inputs:
 - max_attempts : int, optional
     - number of times to retry a failed request before giving up
     - if omitted, will default to 5
-- logging_level : int, optional 
-    - level of logging to use; higher numbers will log fewer messages
-    - 40 = ERROR; will log only when requests fail after all retries
-    - 30 = WARNING; will log when requests his rate limits or other errors
-    - 20 = INFO; will log when requests start and the status at finish
-    - 10 = DEBUG; will log various things as the loop runs to see when they occur
-    - if omitted, will default to 20 (INFO).
+- logging_level : str or int, optional 
+    - level of logging to use; higher severity values will log fewer messages
+    - "CRITICAL" or 50: will log only the most severe errors
+    - "ERROR" or 40: will log when requests fail after all retries
+    - "WARNING" or 30: will log when requests hit rate limits or other errors
+    - "SUCCESS" or 25: will log successful operations (Loguru-specific level)
+    - "INFO" or 20: will log when requests start and the status at finish
+    - "DEBUG" or 10: will log various things as the loop runs to see when they occur
+    - "TRACE" or 5: will log very detailed information for debugging
+    - if omitted, will default to "INFO" (20).
+
 
 The script is structured as follows:
     - Imports
@@ -103,8 +107,8 @@ The script is structured as follows:
 import argparse  # for running script from command line
 import asyncio  # for running API calls concurrently
 import json  # for saving results to a jsonl file
-import logging  # for logging rate limit warnings and other messages
 import os  # for reading API key
+import sys
 import time  # for sleeping after rate limit is hit
 from dataclasses import (
     dataclass,
@@ -114,6 +118,7 @@ from dataclasses import (
 import aiohttp  # for making API calls concurrently
 from anthropic import Anthropic
 from dotenv import find_dotenv, load_dotenv
+from loguru import logger  # for logging rate limit warnings and other messages
 
 
 async def process_api_requests_from_file(
@@ -125,7 +130,7 @@ async def process_api_requests_from_file(
     max_requests_per_minute: float,
     max_tokens_per_minute: float,
     max_attempts: int,
-    logging_level: int,
+    logging_level: str,
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     # Anthropic client
@@ -138,8 +143,10 @@ async def process_api_requests_from_file(
     )
 
     # initialize logging
-    logging.basicConfig(level=logging_level)
-    logging.debug(f"Logging initialized at level {logging_level}")
+    if logging_level:
+        logger.remove()  # Remove the default handler
+        logger.add(sys.stderr, level=args.logging_level)
+        logger.debug(f"Logging initialized at level {logging_level}")
 
     # infer API endpoint and construct request header
     request_header = {
@@ -167,20 +174,20 @@ async def process_api_requests_from_file(
 
     # initialize flags
     file_not_finished = True  # after file is empty, we'll skip reading it
-    logging.debug("Initialization complete.")
+    logger.debug("Initialization complete.")
 
     # initialize file reading
     with open(requests_filepath) as file:
         # `requests` will provide requests one at a time
         requests = file.__iter__()
-        logging.debug("File opened. Entering main loop")
+        logger.debug("File opened. Entering main loop")
         async with aiohttp.ClientSession() as session:  # Initialize ClientSession here
             while True:
                 # get next request (if one is not already waiting for capacity)
                 if next_request is None:
                     if not queue_of_requests_to_retry.empty():
                         next_request = queue_of_requests_to_retry.get_nowait()
-                        logging.debug(
+                        logger.debug(
                             f"Retrying request {next_request.task_id}: {next_request}"
                         )
                     elif file_not_finished:
@@ -201,12 +208,12 @@ async def process_api_requests_from_file(
                             )
                             status_tracker.num_tasks_started += 1
                             status_tracker.num_tasks_in_progress += 1
-                            logging.debug(
+                            logger.debug(
                                 f"Reading request {next_request.task_id}: {next_request}"
                             )
                         except StopIteration:
                             # if file runs out, set flag to stop reading it
-                            logging.debug("Read file exhausted")
+                            logger.debug("Read file exhausted")
                             file_not_finished = False
 
                 # update available capacity
@@ -272,22 +279,22 @@ async def process_api_requests_from_file(
                     )
                     await asyncio.sleep(remaining_seconds_to_pause)
                     # ^e.g., if pause is 15 seconds and final limit was hit 5 seconds ago
-                    logging.warning(
+                    logger.warning(
                         f"Pausing to cool down until {time.ctime(status_tracker.time_of_last_rate_limit_error + seconds_to_pause_after_rate_limit_error)}"
                     )
 
         # after finishing, log final status
-        logging.info(
+        logger.info(
             f"""Parallel processing complete. Results saved to {save_filepath}"""
         )
-        logging.info(f"""Total input tokens {status_tracker.total_tokens_used}""")
+        logger.info(f"""Total input tokens {status_tracker.total_tokens_used}""")
 
         if status_tracker.num_tasks_failed > 0:
-            logging.warning(
+            logger.warning(
                 f"{status_tracker.num_tasks_failed} / {status_tracker.num_tasks_started} requests failed. Errors logged to {save_filepath}."
             )
         if status_tracker.num_rate_limit_errors > 0:
-            logging.warning(
+            logger.warning(
                 f"{status_tracker.num_rate_limit_errors} rate limit errors received. Consider running at a lower rate."
             )
 
@@ -334,7 +341,7 @@ class APIRequest:
         status_tracker: StatusTracker,
     ):
         """Calls the Anthropic API and saves results."""
-        logging.info(f"Starting request #{self.task_id}")
+        logger.info(f"Starting request #{self.task_id}")
         error = None
         try:
             async with session.post(
@@ -367,7 +374,7 @@ class APIRequest:
                 )
                 append_to_jsonl(data, save_filepath)
                 status_tracker.num_tasks_succeeded += 1
-                logging.debug(
+                logger.debug(
                     f"Request {self.task_id} completed. Tokens used: {self.actual_tokens}"
                 )
 
@@ -391,7 +398,7 @@ class APIRequest:
             if self.attempts_left:
                 retry_queue.put_nowait(self)
             else:
-                logging.error(
+                logger.error(
                     f"Request {self.task_id} failed after all attempts. Error: {error}"
                 )
 
@@ -457,7 +464,7 @@ def update_token_usage(request: APIRequest, status_tracker: StatusTracker) -> No
     new_capacity = status_tracker.available_token_capacity - token_difference
 
     if new_capacity < 0:
-        logging.debug(
+        logger.debug(
             f"Token capacity would have gone negative by {abs(new_capacity)} tokens. Resetting to 0."
         )
         status_tracker.available_token_capacity = 0
@@ -495,7 +502,11 @@ if __name__ == "__main__":
     parser.add_argument("--max_requests_per_minute", type=int, default=50 * 0.8)
     parser.add_argument("--max_tokens_per_minute", type=int, default=20_000 * 0.8)
     parser.add_argument("--max_attempts", type=int, default=5)
-    parser.add_argument("--logging_level", default=logging.INFO)
+    parser.add_argument(
+        "--logging_level",
+        choices=["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+    )
     args = parser.parse_args()
 
     if args.save_filepath is None:
@@ -512,7 +523,7 @@ if __name__ == "__main__":
             max_requests_per_minute=float(args.max_requests_per_minute),
             max_tokens_per_minute=float(args.max_tokens_per_minute),
             max_attempts=int(args.max_attempts),
-            logging_level=int(args.logging_level),
+            logging_level=args.logging_level,
         )
     )
 
