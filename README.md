@@ -21,29 +21,29 @@ A key feature of this processor is its approach to token estimation. Since there
 This project was developed using Python **3.10.13**. For optimal compatibility and performance, it is strongly recommended that you use the same version.
 
 1. Clone the repository:
-```bash
-git clone https://github.com/your-username/anthropic-parallel-processor.git
-```
-```bash
-cd anthropic-parallel-processor
-```
+    ```bash
+    git clone https://github.com/your-username/anthropic-parallel-processor.git
+    ```
+    ```bash
+    cd anthropic-parallel-processor
+    ```
 2. Create virtual environment:
-```bash
-python -m venv .venv
-```
-For macOS/Linux:
-```bash
-source .venv/bin/activate
-```
-For Windows:
-```bash
-.venv\Scripts\activate
-```
+    ```bash
+    python -m venv .venv
+    ```
+    For macOS/Linux:
+    ```bash
+    source .venv/bin/activate
+    ```
+    For Windows:
+    ```bash
+    .venv\Scripts\activate
+    ```
 
 3. Install dependencies:
-```
-pip install -r requirements.txt
-```
+    ```
+    pip install -r requirements.txt
+    ```
 
 4. Set up your Anthropic API key:
 
@@ -59,7 +59,7 @@ pip install -r requirements.txt
       export ANTHROPIC_API_KEY=your-api-key-here
       ```
 
-   Note: Replace 'your-api-key-here' with your actual Anthropic API key.
+   > 📎 **Note**: Replace 'your-api-key-here' with your actual Anthropic API key.
 
 ### Usage
 
