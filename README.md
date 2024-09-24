@@ -90,7 +90,7 @@ python api_request_parallel_processor.py \
 --logging_level INFO
 ```
 
-### Input File Format
+## Input File Format
 The input file should be a JSONL file where each line is a JSON object representing a single API request. Here's an example structure:
 ```json
 {"model": "claude-3-5-sonnet-20240620", "max_tokens": 1024, "messages": [{"role": "user", "content": "Tell me a joke"}], "metadata": {"row_id": 1}}
@@ -121,7 +121,87 @@ For caching, use the following structure:
 }
 ```
 
-### Configuration Options
+
+## Generating Request Files
+
+You can generate JSONL files for API requests using Python. The following examples demonstrate one approach for both non-caching and caching scenarios, but keep in mind that there are many ways to create these files depending on your specific needs and data sources. These examples are meant to serve as a starting point:
+
+
+### Without Caching
+
+To generate a JSONL file for standard requests:
+
+```python
+import json
+
+filename = "examples/test_requests_to_parallel_process.jsonl"
+n_requests = 10
+jobs = [
+    {
+        "model": "claude-3-5-sonnet-20240620",
+        "max_tokens": 1024,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "user",
+                "content": f"How much is 8 * {x}? Return only the result.\n Result:",
+            }
+        ],
+    }
+    for x in range(n_requests)
+]
+with open(filename, "w") as f:
+    for job in jobs:
+        json_string = json.dumps(job)
+        f.write(json_string + "\n")
+```
+
+### With Caching
+
+For requests utilizing caching:
+
+```python
+import json
+
+filename = "examples/test_caching_requests_to_parallel_process.jsonl"
+queries = [
+    "<query/instruction_1>",
+    "<query/instruction_2>",
+    # ...
+]
+jobs = [
+    {
+        "model": "claude-3-5-sonnet-20240620",
+        "max_tokens": 1024,
+        "temperature": 0,
+        "system": [
+            {
+                "type": "text",
+                "text": "You are an AI assistant tasked with... Your goal is to provide insightful information and knowledge.\n",
+            },
+            {
+                "type": "text",
+                "text": "<Large repetitive prompt you want to cache.>",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": query,
+            }
+        ],
+    }
+    for query in queries
+]
+with open(filename, "w") as f:
+    for job in jobs:
+        json_string = json.dumps(job)
+        f.write(json_string + "\n")
+```
+Remember to replace `<Large repetitive prompt you want to cache.>` and `<query/instruction_X>` with your actual data.
+
+## Configuration Options
 
 - `requests_filepath`: Path to the input JSONL file.
 - `save_filepath`: Path for the output JSONL file (optional).
