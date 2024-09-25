@@ -222,4 +222,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## To Do:
 - [ ] Add Anthropic Tiers
-- [ ] remove dotenv 
+- [ ] remove dotenv
+- [ ] Add initial ping for caching and warning 
