@@ -1,124 +1,18 @@
-"""
-API REQUEST PARALLEL PROCESSOR
-
-Using the Anthropic API to process lots of text quickly takes some care.
-If you trickle in a million API requests one by one, they'll take days to complete.
-If you flood a million API requests in parallel, they'll exceed the rate limits and fail with errors.
-To maximize throughput, parallel requests need to be throttled to stay under rate limits.
-
-This script parallelizes requests to the OpenAI API while throttling to stay under rate limits.
-
-Features:
-- Streams requests from file, to avoid running out of memory for giant jobs
-- Makes requests concurrently, to maximize throughput
-- Throttles request and token usage, to stay under rate limits
-- Retries failed requests up to {max_attempts} times, to avoid missing data
-- Logs errors, to diagnose problems with requests
-
-Example command to call script:
-- Without Caching:
-```
-python api_request_parallel_processor.py \
-  --requests_filepath examples/test_requests_to_parallel_process.jsonl \
-  --save_filepath examples/data/test_requests_to_parallel_process_results.jsonl \
-  --request_url https://api.anthropic.com/v1/messages \
-  --max_requests_per_minute 40 \
-  --max_tokens_per_minute 16000 \
-  --max_attempts 5 \
-  --logging_level 20
-```
-- With Caching:
-```
-python api_request_parallel_processor.py \
-  --requests_filepath examples/test_caching_requests_to_parallel_process.jsonl \
-  --save_filepath examples/data/test_caching_requests_to_parallel_process_results.jsonl \
-  --request_url https://api.anthropic.com/v1/messages \
-  --use_caching True \
-  --max_requests_per_minute 40 \
-  --max_tokens_per_minute 16000 \
-  --max_attempts 5 \
-  --logging_level 20
-```
-
-Inputs:
-- requests_filepath : str
-    - path to the file containing the requests to be processed
-    - file should be a jsonl file, where each line is a json object with API parameters and an optional metadata field
-    - e.g., {"model": "claude-3-5-sonnet-20240620", "max_tokens": 1024, "messages": [{"role": "user", "content": f"Tell me a joke"}], "metadata": {"row_id": 1}}
-    - as with all jsonl files, take care that newlines in the content are properly escaped (json.dumps does this automatically)
-    - an example file is provided at examples/test_requests_to_parallel_process.jsonl
-    - the code to generate the example file is appended to the bottom of this script
-- save_filepath : str, optional
-    - path to the file where the results will be saved
-    - file will be a jsonl file, where each line is an array with the original request plus the API response
-    - e.g., [{"model": "claude-3-5-sonnet-20240620", "max_tokens": 1024, "messages": [{"role": "user", "content": f"Tell me a joke"}]}, {...}]
-    - if omitted, results will be saved to {requests_filename}_results.jsonl
-- request_url : str, optional
-    - URL of the API endpoint to call
-    - if omitted, will default to "https://api.anthropic.com/v1/messages"
-- api_key : str, optional
-    - API key to use
-    - if omitted, the script will attempt to read it from an environment variable {os.getenv("ANTHROPIC_API_KEY")}
-- max_requests_per_minute : float, optional
-    - target number of requests to make per minute (will make less if limited by tokens)
-    - leave headroom by setting this to 50% or 75% of your limit
-    - if requests are limiting you, try batching multiple embeddings or completions into one request
-    - if omitted, will default to 40
-- max_tokens_per_minute : float, optional
-    - target number of tokens to use per minute (will use less if limited by requests)
-    - leave headroom by setting this to 50% or 75% of your limit
-    - if omitted, will default to 16,000
-- max_attempts : int, optional
-    - number of times to retry a failed request before giving up
-    - if omitted, will default to 5
-- logging_level : str or int, optional 
-    - level of logging to use; higher severity values will log fewer messages
-    - "CRITICAL" or 50: will log only the most severe errors
-    - "ERROR" or 40: will log when requests fail after all retries
-    - "WARNING" or 30: will log when requests hit rate limits or other errors
-    - "SUCCESS" or 25: will log successful operations (Loguru-specific level)
-    - "INFO" or 20: will log when requests start and the status at finish
-    - "DEBUG" or 10: will log various things as the loop runs to see when they occur
-    - "TRACE" or 5: will log very detailed information for debugging
-    - if omitted, will default to "INFO" (20).
-
-
-The script is structured as follows:
-    - Imports
-    - Define main()
-        - Initialize things
-        - In main loop:
-            - Get next request if one is not already waiting for capacity
-            - Update available token & request capacity
-            - If enough capacity available, call API
-            - The loop pauses if a rate limit error is hit
-            - The loop breaks when no tasks remain
-    - Define dataclasses
-        - StatusTracker (stores script metadata counters; only one instance is created)
-        - APIRequest (stores API inputs, outputs, metadata; one method to call API)
-    - Define functions
-        - append_to_jsonl (writes to results file)
-        - estimate_num_tokens_from_request (smaller function to roughly estimate token usage from request)
-        - task_id_generator_function (yields 0, 1, 2, ...)
-    - Run main()
-"""
-
-# imports
-import argparse  # for running script from command line
-import asyncio  # for running API calls concurrently
-import json  # for saving results to a jsonl file
-import os  # for reading API key
+import argparse
+import asyncio
+import json
+import os
 import sys
-import time  # for sleeping after rate limit is hit
+import time
 from dataclasses import (
     dataclass,
     field,
-)  # for storing API inputs, outputs, and metadata
+)
 
-import aiohttp  # for making API calls concurrently
+import aiohttp
 from anthropic import Anthropic
 from dotenv import find_dotenv, load_dotenv
-from loguru import logger  # for logging rate limit warnings and other messages
+from loguru import logger
 
 
 async def process_api_requests_from_file(
@@ -133,7 +27,6 @@ async def process_api_requests_from_file(
     logging_level: str,
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
-    # Anthropic client
     client = Anthropic(api_key=api_key)
 
     # constants
@@ -157,31 +50,25 @@ async def process_api_requests_from_file(
     if use_caching:
         request_header["anthropic-beta"] = "prompt-caching-2024-07-31"
 
-    # initialize trackers
     queue_of_requests_to_retry = asyncio.Queue()
-    task_id_generator = (
-        task_id_generator_function()
-    )  # generates integer IDs of 0, 1, 2, ...
+    task_id_generator = task_id_generator_function()
     status_tracker = StatusTracker(
         available_token_capacity=max_tokens_per_minute, use_caching=use_caching
-    )  # single instance to track a collection of variables
-    next_request = None  # variable to hold the next request to call
+    )
+    next_request = None
 
-    # initialize available capacity counts
     available_request_capacity = max_requests_per_minute
-    # available_token_capacity = max_tokens_per_minute
+
     last_update_time = time.time()
 
     # initialize flags
     file_not_finished = True  # after file is empty, we'll skip reading it
     logger.debug("Initialization complete.")
 
-    # initialize file reading
     with open(requests_filepath) as file:
-        # `requests` will provide requests one at a time
         requests = file.__iter__()
         logger.debug("File opened. Entering main loop")
-        async with aiohttp.ClientSession() as session:  # Initialize ClientSession here
+        async with aiohttp.ClientSession() as session:
             while True:
                 # get next request (if one is not already waiting for capacity)
                 if next_request is None:
@@ -256,7 +143,7 @@ async def process_api_requests_from_file(
                             )
                         )
 
-                        next_request = None  # reset next_request to empty
+                        next_request = None
 
                 # if all tasks are finished, break
                 if status_tracker.num_tasks_in_progress == 0:
@@ -278,7 +165,6 @@ async def process_api_requests_from_file(
                         - seconds_since_rate_limit_error
                     )
                     await asyncio.sleep(remaining_seconds_to_pause)
-                    # ^e.g., if pause is 15 seconds and final limit was hit 5 seconds ago
                     logger.warning(
                         f"Pausing to cool down until {time.ctime(status_tracker.time_of_last_rate_limit_error + seconds_to_pause_after_rate_limit_error)}"
                     )
@@ -297,9 +183,6 @@ async def process_api_requests_from_file(
             logger.warning(
                 f"{status_tracker.num_rate_limit_errors} rate limit errors received. Consider running at a lower rate."
             )
-
-
-# dataclasses
 
 
 @dataclass
@@ -385,9 +268,7 @@ class APIRequest:
                 if "rate limit" in str(error).lower():
                     status_tracker.time_of_last_rate_limit_error = time.time()
                     status_tracker.num_rate_limit_errors += 1
-                    status_tracker.num_api_errors -= (
-                        1  # rate limit errors are counted separately
-                    )
+                    status_tracker.num_api_errors -= 1
 
         except Exception as e:
             error = str(e)
@@ -411,9 +292,6 @@ class APIRequest:
                 status_tracker.num_tasks_failed += 1
 
         status_tracker.num_tasks_in_progress -= 1
-
-
-# functions
 
 
 def append_to_jsonl(data, filename: str) -> None:
@@ -480,17 +358,13 @@ def task_id_generator_function():
         task_id += 1
 
 
-# run script
-
-
 if __name__ == "__main__":
     status = load_dotenv(find_dotenv())
     if status:
-        print("Successfully loaded .env file")
+        logger.debug("Successfully loaded .env file")
     else:
-        print("No .env file found")
+        logger.debug("No .env file found")
 
-    # parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--requests_filepath")
     parser.add_argument("--save_filepath", default=None)
@@ -526,78 +400,3 @@ if __name__ == "__main__":
             logging_level=args.logging_level,
         )
     )
-
-
-"""
-APPENDIX
-
-## Calling Claude withouth Caching
-The example requests file at Anthropic-Parallelism/examples/test_requests_to_parallel_process contains 10 requests to `claude-3-5-sonnet-20240620`.
-
-It was generated with the following code:
-
-```python
-import json
-
-filename = "examples/test_requests_to_parallel_process.jsonl"
-n_requests = 10
-jobs = [
-    {
-        "model": "claude-3-5-sonnet-20240620",
-        "max_tokens": 1024,
-        "temperature": 0,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"How much is 8 * {x}?",
-            }
-        ],
-    }
-    for x in range(n_requests)
-]
-with open(filename, "w") as f:
-    for job in jobs:
-        json_string = json.dumps(job)
-        f.write(json_string + "\n")
-```
-
-As with all jsonl files, take care that newlines in the content are properly escaped (json.dumps does this automatically).
-
-## Calling Claude with Caching
-
-filename = "examples/test_caching_requests_to_parallel_process.jsonl"
-jobs = [
-    {
-        "model": "claude-3-5-sonnet-20240620",
-        "max_tokens": 1024,
-        "temperature": 0,
-        "system": [
-            {
-                "type": "text",
-                "text": "You are an AI assistant tasked with analyzing blogs. Your goal is to provide insightful information and kowledge.\n",
-            },
-            {
-                "type": "text",
-                "text": "<some very long blog.>",
-                "cache_control": {"type": "ephemeral"},
-            },
-        ],
-        "messages": [
-            {
-                "role": "user",
-                "content": query,
-            }
-        ],
-    }
-    for query in queries
-]
-with open(filename, "w") as f:
-    for job in jobs:
-        json_string = json.dumps(job)
-        f.write(json_string + "\n")
-
-"""
-
-## Set default values for Tier 1
-## TODO: MAybe add all tiers
-## Change logging to loguru
