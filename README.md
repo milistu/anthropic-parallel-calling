@@ -233,6 +233,15 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## Project Origin
+This project was inspired by and adapted from the OpenAI API Request Parallel Processor, which can be found in the OpenAI Cookbook. I've modified and extended the original script to work with Anthropic's API.
+Original sources:
+
+- Script: [api_request_parallel_processor.py](https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py)
+- Repository: [OpenAI Cookbook](https://github.com/openai/openai-cookbook)
+
+We appreciate the work done by OpenAI in creating the original script, which served as a valuable starting point for this project.
+
 
 ## To Do:
 - [ ] Add Anthropic Tiers
