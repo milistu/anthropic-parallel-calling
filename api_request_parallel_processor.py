@@ -57,10 +57,53 @@ async def process_api_requests_from_file(
     file_not_finished = True  # after file is empty, we'll skip reading it
     logger.debug("Initialization complete.")
 
+    def create_api_request(request_json):
+        """Helper function: Create an APIRequest object from a request JSON."""
+        next_request = APIRequest(
+            task_id=next(task_id_generator),
+            request_json=request_json,
+            estimate_token_consumption=estimate_num_tokens_from_request(
+                client,
+                request_json,
+                use_caching,
+                status_tracker.caching_status,
+            ),
+            attempts_left=max_attempts,
+            metadata=request_json.pop("metadata", None),
+        )
+        status_tracker.num_tasks_started += 1
+        status_tracker.num_tasks_in_progress += 1
+        logger.debug(f"Reading request {next_request.task_id}: {next_request}")
+        return next_request
+
     with open(requests_filepath) as file:
         requests = file.__iter__()
         logger.debug("File opened. Entering main loop")
         async with aiohttp.ClientSession() as session:
+
+            if use_caching:
+                logger.info("Initiating caching")
+                request_json = json.loads(next(requests))
+                next_request = create_api_request(request_json)
+
+                await next_request.call_api(
+                    session=session,
+                    request_url=request_url,
+                    request_header=request_header,
+                    retry_queue=queue_of_requests_to_retry,
+                    save_filepath=save_filepath,
+                    status_tracker=status_tracker,
+                )
+                next_request = None
+
+                if status_tracker.caching_status:
+                    logger.success("Caching is enabled and working.")
+                else:
+                    logger.warning(
+                        "Failed to enable caching. Processing without caching in 10s."
+                    )
+                    time.sleep(10)
+
             while True:
                 # get next request (if one is not already waiting for capacity)
                 if next_request is None:
@@ -73,23 +116,8 @@ async def process_api_requests_from_file(
                         try:
                             # get new request
                             request_json = json.loads(next(requests))
-                            next_request = APIRequest(
-                                task_id=next(task_id_generator),
-                                request_json=request_json,
-                                estimate_token_consumption=estimate_num_tokens_from_request(
-                                    client,
-                                    request_json,
-                                    use_caching,
-                                    status_tracker.caching_status,
-                                ),
-                                attempts_left=max_attempts,
-                                metadata=request_json.pop("metadata", None),
-                            )
-                            status_tracker.num_tasks_started += 1
-                            status_tracker.num_tasks_in_progress += 1
-                            logger.debug(
-                                f"Reading request {next_request.task_id}: {next_request}"
-                            )
+                            next_request = create_api_request(request_json)
+
                         except StopIteration:
                             # if file runs out, set flag to stop reading it
                             logger.debug("Read file exhausted")
@@ -230,10 +258,13 @@ class APIRequest:
                     "input_tokens", 0
                 )
                 if status_tracker.use_caching:
-                    num_cache_tokens_used = response_json.get("usage", {}).get(
+                    num_cache_read_tokens = response_json.get("usage", {}).get(
                         "cache_read_input_tokens", 0
                     )
-                    if num_cache_tokens_used > 0:
+                    num_cache_creation_tokens = response_json.get("usage", {}).get(
+                        "cache_creation_input_tokens", 0
+                    )
+                    if num_cache_read_tokens > 0 or num_cache_creation_tokens > 0:
                         status_tracker.caching_status = True
                     else:
                         status_tracker.caching_status = False
@@ -284,6 +315,36 @@ class APIRequest:
                 status_tracker.num_tasks_failed += 1
 
         status_tracker.num_tasks_in_progress -= 1
+
+    def __str__(self):
+        truncated_request = self.request_json.copy()
+        if "system" in truncated_request:
+            truncated_request["system"] = self.truncate_nested_dict(
+                truncated_request["system"]
+            )
+        if "messages" in truncated_request:
+            truncated_request["messages"] = self.truncate_nested_dict(
+                truncated_request["messages"]
+            )
+
+        return (
+            f"APIRequest(task_id={self.task_id}, "
+            f"estimate_token_consumption={self.estimate_token_consumption}, "
+            f"attempts_left={self.attempts_left}, "
+            f"request_json={truncated_request})"
+        )
+
+    def truncate_nested_dict(self, prompt_part: list, max_length: int = 200) -> dict:
+        """Truncate strings in a nested dictionary."""
+        truncated = []
+        for element in prompt_part:
+            temp = {}
+            for key, value in element.items():
+                temp[key] = (
+                    (value[:max_length] + "...") if len(value) > max_length else value
+                )
+            truncated.append(temp)
+        return truncated
 
 
 def append_to_jsonl(data, filename: str) -> None:
