@@ -201,6 +201,14 @@ with open(filename, "w") as f:
 ```
 Remember to replace `<Large repetitive prompt you want to cache.>` and `<query/instruction_X>` with your actual data.
 
+### Note on Metadata 💡
+You can add a `metadata` key to each request object to include any additional information you want to associate with the request. This can be particularly useful for tracking or mapping requests to your dataset. For example:
+
+```python
+"metadata": {"row_id": 1, "source": "dataset_A", "category": "science"}
+```
+The metadata will be preserved in the output, allowing you to easily map the results back to your original data or include any other relevant information for post-processing.
+
 ## Configuration Options
 
 - `requests_filepath`: Path to the input JSONL file.
@@ -211,6 +219,12 @@ Remember to replace `<Large repetitive prompt you want to cache.>` and `<query/i
 - `max_tokens_per_minute`: Target tokens per minute (default: 16,000).
 - `max_attempts`: Number of retries for failed requests (default: 5).
 - `logging_level`: Logging verbosity (default: INFO).
+    - "ERROR" or 40: Logs when requests fail after all retries
+    - "WARNING" or 30: Logs when requests hit rate limits or other errors
+    - "SUCCESS" or 25: Logs successful operations (Loguru-specific level)
+    - "INFO" or 20: Logs when requests start and the status at finish
+    - "DEBUG" or 10: Logs various things as the loop runs to see when they occur
+    - "TRACE" or 5: Logs very detailed information for debugging
 - `use_caching`: Enable caching for repeated content (optional).
 
 ## Contributing
@@ -222,5 +236,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## To Do:
 - [ ] Add Anthropic Tiers
-- [ ] remove dotenv
-- [ ] Add initial ping for caching and warning 
+- [x] remove dotenv
+- [x] move logger setting to main
+- [x] Add initial ping for caching and warning 
