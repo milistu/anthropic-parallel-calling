@@ -11,7 +11,6 @@ from dataclasses import (
 
 import aiohttp
 from anthropic import Anthropic
-from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 
 
@@ -24,7 +23,6 @@ async def process_api_requests_from_file(
     max_requests_per_minute: float,
     max_tokens_per_minute: float,
     max_attempts: int,
-    logging_level: str,
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     client = Anthropic(api_key=api_key)
@@ -34,12 +32,6 @@ async def process_api_requests_from_file(
     seconds_to_sleep_each_loop = (
         0.001  # 1 ms limits max throughput to 1,000 requests per second
     )
-
-    # initialize logging
-    if logging_level:
-        logger.remove()  # Remove the default handler
-        logger.add(sys.stderr, level=args.logging_level)
-        logger.debug(f"Logging initialized at level {logging_level}")
 
     # infer API endpoint and construct request header
     request_header = {
@@ -359,11 +351,6 @@ def task_id_generator_function():
 
 
 if __name__ == "__main__":
-    status = load_dotenv(find_dotenv())
-    if status:
-        logger.debug("Successfully loaded .env file")
-    else:
-        logger.debug("No .env file found")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--requests_filepath")
@@ -386,6 +373,11 @@ if __name__ == "__main__":
     if args.save_filepath is None:
         args.save_filepath = args.requests_filepath.replace(".jsonl", "_results.jsonl")
 
+    if args.logging_level:
+        logger.remove()  # Remove the default handler
+        logger.add(sys.stderr, level=args.logging_level)
+        logger.debug(f"Logging initialized at level {args.logging_level}")
+
     # run script
     asyncio.run(
         process_api_requests_from_file(
@@ -397,6 +389,5 @@ if __name__ == "__main__":
             max_requests_per_minute=float(args.max_requests_per_minute),
             max_tokens_per_minute=float(args.max_tokens_per_minute),
             max_attempts=int(args.max_attempts),
-            logging_level=args.logging_level,
         )
     )
