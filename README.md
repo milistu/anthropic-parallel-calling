@@ -219,12 +219,12 @@ The metadata will be preserved in the output, allowing you to easily map the res
 - `max_tokens_per_minute`: Target tokens per minute (default: 16,000).
 - `max_attempts`: Number of retries for failed requests (default: 5).
 - `logging_level`: Logging verbosity (default: INFO).
-    - "ERROR" or 40: Logs when requests fail after all retries
-    - "WARNING" or 30: Logs when requests hit rate limits or other errors
-    - "SUCCESS" or 25: Logs successful operations (Loguru-specific level)
-    - "INFO" or 20: Logs when requests start and the status at finish
-    - "DEBUG" or 10: Logs various things as the loop runs to see when they occur
-    - "TRACE" or 5: Logs very detailed information for debugging
+    - **ERROR** or 40: Logs when requests fail after all retries
+    - **WARNING** or 30: Logs when requests hit rate limits or other errors
+    - **SUCCESS** or 25: Logs successful operations (Loguru-specific level)
+    - **INFO** or 20: Logs when requests start and the status at finish
+    - **DEBUG** or 10: Logs various things as the loop runs to see when they occur
+    - **TRACE** or 5: Logs very detailed information for debugging
 - `use_caching`: Enable caching for repeated content (optional).
 
 ## Contributing
