@@ -89,8 +89,19 @@ python api_request_parallel_processor.py \
 --max_attempts 5 \
 --logging_level INFO
 ```
+## Important Note ⚠️
 
-## Important Note on Rate Limits ⚠️
+### Cache Limitations
+The minimum cacheable prompt length is:
+
+- 1024 tokens for Claude 3.5 Sonnet and Claude 3 Opus
+- 2048 tokens for Claude 3 Haiku
+
+We suggest first testing the prompt manually until you see that caching works. In our script, there is an initial call for caching that will let you know if caching is used. If not, you will receive a warning and a 10-second delay before starting the parallel API calls, giving you time to kill the process if needed.
+
+You can learn more about caching from the official Anthropic documentation: [Prompt Caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)
+
+### Rate Limits
 Users need to be aware of and check their specific rate limits. The default settings in this script (40 requests per minute and 16,000 tokens per minute) are set to approximately 80% of the `Tier 1` limits. However, based on your tier, there can be different rate limits.
 
 To check your Tier and rate limits:
