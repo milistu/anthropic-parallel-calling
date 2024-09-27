@@ -90,6 +90,19 @@ python api_request_parallel_processor.py \
 --logging_level INFO
 ```
 
+## Important Note on Rate Limits ⚠️
+Users need to be aware of and check their specific rate limits. The default settings in this script (40 requests per minute and 16,000 tokens per minute) are set to approximately 80% of the `Tier 1` limits. However, based on your tier, there can be different rate limits.
+
+To check your Tier and rate limits:
+- Go to the Anthropic Console
+- Navigate to the Settings tab
+- Look for the Limits tab in the sidebar on the left side
+- Here you can see Rate limits for all models and your current tier
+
+You can read more about rate limits and tiers in the official Anthropic documentation: [Anthropic API Rate Limits](https://docs.anthropic.com/en/api/rate-limits)
+
+Make sure to adjust the `max_requests_per_minute` and `max_tokens_per_minute` configuration options according to your specific tier and needs to ensure optimal performance and avoid hitting rate limits.
+
 ## Input File Format
 The input file should be a JSONL file where each line is a JSON object representing a single API request. Here's an example structure:
 ```json
