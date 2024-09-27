@@ -427,7 +427,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--logging_level",
         choices=["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"],
-        default=None,
+        default="INFO",
     )
     args = parser.parse_args()
 
