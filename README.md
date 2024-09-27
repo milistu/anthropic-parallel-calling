@@ -27,7 +27,7 @@ This project was developed using Python **3.10.13**. For optimal compatibility a
     ```bash
     cd anthropic-parallel-processor
     ```
-2. Create virtual environment:
+2. Create a virtual environment:
     ```bash
     python -m venv .venv
     ```
@@ -89,7 +89,7 @@ python api_request_parallel_processor.py \
 --max_attempts 5 \
 --logging_level INFO
 ```
-## Important Note ⚠️
+## Important Notes ⚠️
 
 ### Cache Limitations
 The minimum cacheable prompt length is:
@@ -259,16 +259,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Project Origin
 This project was inspired by and adapted from the OpenAI API Request Parallel Processor, which can be found in the OpenAI Cookbook. I've modified and extended the original script to work with Anthropic's API.
-Original sources:
+Sources:
 
 - Script: [api_request_parallel_processor.py](https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py)
 - Repository: [OpenAI Cookbook](https://github.com/openai/openai-cookbook)
 
 We appreciate the work done by OpenAI in creating the original script, which served as a valuable starting point for this project.
-
-
-## To Do:
-- [ ] Add Anthropic Tiers
-- [x] remove dotenv
-- [x] move logger setting to main
-- [x] Add initial ping for caching and warning 
