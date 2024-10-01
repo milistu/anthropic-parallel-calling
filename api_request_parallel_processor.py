@@ -23,9 +23,15 @@ async def process_api_requests_from_file(
     max_requests_per_minute: float,
     max_tokens_per_minute: float,
     max_attempts: int,
+    logging_level: str,
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     client = Anthropic(api_key=api_key)
+
+    if logging_level:
+        logger.remove()  # Remove the default handler
+        logger.add(sys.stderr, level=logging_level)
+        logger.debug(f"Logging initialized at level {logging_level}")
 
     # constants
     seconds_to_pause_after_rate_limit_error = 15
@@ -434,11 +440,6 @@ if __name__ == "__main__":
     if args.save_filepath is None:
         args.save_filepath = args.requests_filepath.replace(".jsonl", "_results.jsonl")
 
-    if args.logging_level:
-        logger.remove()  # Remove the default handler
-        logger.add(sys.stderr, level=args.logging_level)
-        logger.debug(f"Logging initialized at level {args.logging_level}")
-
     # run script
     asyncio.run(
         process_api_requests_from_file(
@@ -450,5 +451,6 @@ if __name__ == "__main__":
             max_requests_per_minute=float(args.max_requests_per_minute),
             max_tokens_per_minute=float(args.max_tokens_per_minute),
             max_attempts=int(args.max_attempts),
+            logging_level=args.logging_level,
         )
     )
